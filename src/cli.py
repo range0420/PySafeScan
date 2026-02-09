@@ -7,6 +7,7 @@ import os
 import json
 from pathlib import Path
 from datetime import datetime
+from visualization.html_generator import generate_report
 
 # 添加src到Python路径
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -213,6 +214,10 @@ def run_scan(args):
     # 保存结果（如果指定了输出文件但不是JSON格式）
     if args.output and args.format != "json":
         save_results(all_results, args.output, args.format)
+
+    if args.ai:
+        from visualization.html_generator import generate_report
+        generate_report(all_results) # all_results 通常是全局存储所有发现的列表
 
 def save_results(results, output_path, format_type):
     """保存结果到文件"""
