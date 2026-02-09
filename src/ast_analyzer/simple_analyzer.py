@@ -12,14 +12,10 @@ class SimplePythonAnalyzer:
     
     # 常见危险函数列表
     DANGEROUS_FUNCTIONS = {
-        'exec', 'eval', 'compile', 
-        'open', '__import__',
-        'os.system', 'os.popen', 'os.spawn', 'os.spawnl', 'os.spawnle', 'os.spawnlp', 'os.spawnlpe', 'os.spawnv', 'os.spawnve', 'os.spawnvp', 'os.spawnvpe',
-        'subprocess.run', 'subprocess.call', 'subprocess.Popen', 'subprocess.check_call', 'subprocess.check_output',
-        'pickle.loads', 'pickle.load',
-        'yaml.load', 'yaml.safe_load',
-        'marshal.loads',
-        'sqlite3.connect.execute',  # 简化的SQL注入检测
+        'exec', 'eval', 'execute', 'compile', 'open', '__import__',
+        'os.system', 'os.popen', 'os.spawn', 'subprocess.run',
+        'subprocess.call', 'subprocess.Popen', 'pickle.loads',
+        'yaml.load', 'sqlite3.connect', 'cursor.execute', 'conn.execute'
     }
     
     def __init__(self):
@@ -140,6 +136,11 @@ class SimplePythonAnalyzer:
     
     def _is_dangerous_function(self, func_name: str) -> bool:
         """检查是否是危险函数"""
+       # --- 新增：模糊匹配 execute ---
+        # 只要是以 .execute 结尾的调用，统统抓出来给 AI 分析
+        if func_name.endswith('.execute') or func_name == 'execute':
+            return True
+
         # 1. 完全匹配
         if func_name in self.DANGEROUS_FUNCTIONS:
             return True

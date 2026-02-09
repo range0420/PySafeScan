@@ -4,3 +4,7 @@ colorama>=0.4.6
 
 # 测试框架
 pytest>=7.4.0
+networkx>=3.0
+plotly>=5.0
+pandas>=2.0
+kaleido>=0.1

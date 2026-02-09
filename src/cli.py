@@ -9,9 +9,14 @@ from pathlib import Path
 from datetime import datetime
 
 # 添加src到Python路径
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
 
 from ast_analyzer.simple_analyzer import SimplePythonAnalyzer
+
+
+from context_retriever import get_enhanced_context
 # 导入新增的DeepSeek分析器
 try:
     from llm_integration.deepseek_api import DeepSeekSecurityAnalyzer
@@ -119,6 +124,12 @@ def run_scan(args):
 
             for i in range(0, len(all_results), batch_size):
                 batch = all_results[i:i + batch_size]
+                for item in batch:
+                    file_path = item.get('file') or item.get('filename')
+                    line_num = item.get('line') or item.get('line_number')
+                    if file_path and line_num:
+                        context = get_enhanced_context(file_path, int(line_num))
+                        item['full_context'] = context
                 print(f"  处理批次 {i//batch_size + 1}/{(len(all_results)-1)//batch_size + 1} ({len(batch)}个API)")
 
                 batch_enhanced = ai_analyzer.analyze_risk_batch(batch)

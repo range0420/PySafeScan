@@ -111,18 +111,28 @@ class DeepSeekSecurityAnalyzer:
         api_details = []
         for i, api in enumerate(api_calls[:15]):  # 限制数量，避免过长
             api_text = api.get('api', '')
-            api_details.append(f"{i+1}. {api_text}")
+            code_context = api.get('full_context')
+            detail = f"ID: {i+1}\n"
+            detail += f"API调用语句: {api_text}\n"
+            if code_context and "未找到" not in code_context:
+                detail += f"代码上下文（函数体）:\n```python\n{code_context}\n```"
+            else:
+                detail += f"（未找到函数上下文，请仅基于此行分析）"
+            api_details.append(detail)
+        formatted_apis = "\n\n---\n\n".join(api_details)
 
-        prompt = f"""请分析以下Python API调用的安全风险，严格按JSON格式返回。
+        prompt = f"""你是一个顶尖的Python安全专家。请分析以下代码片段中API调用的安全风险。
+我已经为你提供了每个API所在的函数上下文，请利用上下文判断该风险是否真实存在（排除误报）。
 
-    API调用列表（共{len(api_calls)}个）：
-    {chr(10).join(api_details)}
+待分析列表：
+{formatted_apis}
 
     分析要求（对每个API）：
     1. category: "source"（用户输入点）/ "sink"（危险操作点）/ "propagator"（数据传播）/ "safe"（安全）
     2. risk_level: "high" / "medium" / "low"
     3. vulnerability: "command_injection", "path_traversal", "sql_injection", "deserialization", "xss", "info_leak", "other"
     4. suggestion: 中文修复建议，50字以内
+    5. 深度审计： 如果在提供的上下文代码中发现了除 API 调用语句之外的其他安全隐患（如拼写 SQL 字符串），请务必在 suggestion 中指出
 
     重要：返回的JSON中，每个"api"字段必须使用上面提供的完整API文本，不要修改！
 
