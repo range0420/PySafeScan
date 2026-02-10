@@ -74,41 +74,32 @@ class SimplePythonAnalyzer:
                 self._analyze_call(node, filename)
     
     def _analyze_call(self, node: ast.Call, filename: str):
-        """分析函数调用"""
         try:
-            # 获取函数名
             func_name = self._get_function_name(node.func)
-            if not func_name:
-                return
+            if not func_name: return
+
+            # 1. 判定逻辑：
+            # 或者是危险函数名
+            is_danger_func = self._is_dangerous_function(func_name)
             
-            # 检查是否是危险函数
-            if self._is_dangerous_function(func_name):
-                # 提取代码片段
-                try:
-                    code_snippet = ast.unparse(node) if hasattr(ast, 'unparse') else self._safe_unparse(node)
-                except:
-                    code_snippet = str(node)
-                
-                # 创建统一的数据结构
+            # 或者参数里引用了刚才拼接好的变量（比如 sql = f"..." 之后的 run_query(..., sql)）
+            # 为了简单起见，我们捕获所有带有 Name 参数或拼接参数的自定义调用
+            has_suspicious_arg = any(isinstance(arg, (ast.JoinedStr, ast.BinOp, ast.Name)) for arg in node.args)
+
+            # 特别：如果函数名不是内置的（比如自定义的 run_query），且参数看起来像数据传递
+            is_custom_dispatch = "." not in func_name and func_name not in ["print", "len", "dict", "list"]
+
+            if is_danger_func or (is_custom_dispatch and has_suspicious_arg):
+                code_snippet = ast.unparse(node)
                 result = {
-                    # 向后兼容的字段
-                    'filename': filename,
-                    'line': node.lineno,
-                    'column': node.col_offset if hasattr(node, 'col_offset') else 0,
-                    'function': func_name,
-                    'context': f"行 {node.lineno}",
-                    'code': code_snippet,
-                    
-                    # 新的统一字段（供deepseek_api使用）
-                    'file': filename,
-                    'api': code_snippet,  # 使用完整代码片段作为api字段
-                    'function_name': func_name,  # 纯函数名
+                    'file': filename, 'line': node.lineno,
+                    'api': code_snippet, 'function_name': func_name,
+                    'column': getattr(node, 'col_offset', 0)
                 }
-                
-                self.results.append(result)
-                
+                if result not in self.results:
+                    self.results.append(result)
         except Exception as e:
-            print(f"分析调用节点时出错: {e}")
+            print(f"Error analyzing node: {e}")
     
     def _get_function_name(self, node) -> str:
         """提取函数名"""

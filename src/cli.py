@@ -106,7 +106,7 @@ def run_scan(args):
     
     print(f"\n✅ 基础分析完成! 发现 {len(all_results)} 个潜在危险API调用")
     
-    # AI分析阶段
+# AI分析阶段 (替换你代码中 if args.ai and DEEPSEEK_AVAILABLE: 之后的部分)
     if args.ai and DEEPSEEK_AVAILABLE:
         if not all_results:
             print("⚠️  未发现需要分析的API调用")
@@ -118,8 +118,6 @@ def run_scan(args):
 
         try:
             ai_analyzer = DeepSeekSecurityAnalyzer()
-
-            # 分批处理API调用（控制token消耗）
             batch_size = args.batch_size
             enhanced_results = []
 
@@ -129,95 +127,56 @@ def run_scan(args):
                     file_path = item.get('file') or item.get('filename')
                     line_num = item.get('line') or item.get('line_number')
                     if file_path and line_num:
+                        # 触发 Jedi 跨文件上下文抓取
                         context = get_enhanced_context(file_path, int(line_num))
                         item['full_context'] = context
+                
                 print(f"  处理批次 {i//batch_size + 1}/{(len(all_results)-1)//batch_size + 1} ({len(batch)}个API)")
-
                 batch_enhanced = ai_analyzer.analyze_risk_batch(batch)
+                # 调试点：打印 AI 原始返回，看里面有没有 fix_code
+                print(f"DEBUG AI RETURN: {batch_enhanced}")
                 enhanced_results.extend(batch_enhanced)
 
             all_results = enhanced_results
             print(f"💡 AI分析完成! 累计估算成本: ¥{ai_analyzer.total_cost:.4f}")
+
+            # --- 新增：自动修复逻辑 ---
+            # 1. 提取所有包含修复代码的高风险项
+            high_risks = [r for r in all_results if r.get('risk_level') == 'high' and r.get('fix_code')]
+            print(f"DEBUG: 最终筛选出可修复的高风险项: {len(high_risks)} 个")
+            # 2. 生成可视化报告
+            generate_report(all_results)
+
+            # 3. 交互式修复过程
+            if high_risks:
+                print(f"\n" + "🔧"*20)
+                print(f"🔧 AI 修复助手: 发现 {len(high_risks)} 个可自动修复的高风险漏洞")
+                print("🔧"*20)
+                
+                choice = input("\n👉 是否进入交互式修复模式? (y/n): ").lower()
+                if choice == 'y':
+                    # 确保 core 文件夹下有 __init__.py 
+                    from core.patcher import apply_fix
+                    for r in high_risks:
+                        print(f"\n📍 位置: {r.get('file')}:{r.get('line')}")
+                        print(f"❌ 原始代码: {r.get('api')}")
+                        print(f"✅ 建议修复: {r.get('fix_code')}")
+                        
+                        if input("🛠️  生成修复后的文件? (y/n): ").lower() == 'y':
+                            new_file = apply_fix(
+                                r['file'], 
+                                r['line'], 
+                                r['api'], 
+                                r['fix_code'],
+                                full_context=r.get('full_context'),
+                                is_block_fix=r.get('is_block_fix', False)
+        )
+                            print(f"✨ 修复完成！请查看新文件: {new_file}")
+                else:
+                    print("⏭️ 已跳过自动修复步骤。")
+
         except Exception as e:
             print(f"⚠️  AI分析失败: {e}，继续使用基础分析结果")
-    
-    elif args.ai and not DEEPSEEK_AVAILABLE:
-        print("⚠️  DeepSeek模块不可用，请先完成API集成")
-    
-    # 输出结果
-    print(f"\n{'='*60}")
-    print(f"📊 扫描报告摘要")
-    print(f"{'='*60}")
-    
-    # 统计信息
-    if any('risk_level' in r for r in all_results):
-        high_risk = sum(1 for r in all_results if r.get('risk_level') == 'high')
-        medium_risk = sum(1 for r in all_results if r.get('risk_level') == 'medium')
-        ai_analyzed = sum(1 for r in all_results if r.get('ai_analyzed', False))
-
-        print(f"高风险: {high_risk} 个 | 中风险: {medium_risk} 个 | AI深度分析: {ai_analyzed} 个")
-    
-    print(f"总共发现: {len(all_results)} 个问题")
-    
-    # 按格式输出
-    if args.format == "json":
-        output_data = {
-            "project": str(path),
-            "scan_time": datetime.now().isoformat(),
-            "statistics": {
-                "total_apis": len(all_results),
-                "high_risk": high_risk if 'high_risk' in locals() else 0,
-                "medium_risk": medium_risk if 'medium_risk' in locals() else 0,
-                "ai_analyzed": ai_analyzed if 'ai_analyzed' in locals() else 0
-            },
-            "vulnerabilities": all_results
-        }
-
-        if args.output:
-            with open(args.output, 'w', encoding='utf-8') as f:
-                json.dump(output_data, f, indent=2, ensure_ascii=False)
-            print(f"📁 JSON报告已保存: {args.output}")
-        else:
-            print(json.dumps(output_data, indent=2, ensure_ascii=False)[:1000] + "...")
-    
-    elif args.format == "summary":
-        # 摘要输出
-        for result in all_results[:20]:  # 只显示前20个
-            risk_icon = "🔴" if result.get('risk_level') == 'high' else "🟡" if result.get('risk_level') == 'medium' else "⚪"
-            filename = result.get('file', result.get('filename', 'unknown'))
-            line = result.get('line', '?')
-            print(f"{risk_icon} [{result.get('risk_level', 'unknown').upper()}] {filename}:{line}")
-            print(f"   调用: {result.get('api', result.get('function', ''))[:80]}{'...' if len(result['api']) > 80 else ''}")
-            if 'suggestion' in result:
-                print(f"   建议: {result['suggestion']}")
-            print()
-
-        if len(all_results) > 20:
-            print(f"... 还有 {len(all_results) - 20} 个问题未显示")
-    else:  # text格式（默认）
-        for result in all_results[:50]:  # 只显示前50个
-            filename = result.get('file', result.get('filename', 'unknown'))
-            line = result.get('line', '?')
-            api_call = result.get('api') or result.get('function', 'unknown')
-            print(f"[{filename}:{line}] {api_call}")
-
-            if 'category' in result:
-                print(f"  分类: {result.get('category', 'N/A')} | 风险: {result.get('risk_level', 'N/A')}")
-                print(f"  漏洞类型: {result.get('vulnerability', 'N/A')}")
-                if 'suggestion' in result:
-                    print(f"  修复建议: {result['suggestion']}")
-            print()
-
-        if len(all_results) > 50:
-            print(f"... 还有 {len(all_results) - 50} 个问题未显示")
-    
-    # 保存结果（如果指定了输出文件但不是JSON格式）
-    if args.output and args.format != "json":
-        save_results(all_results, args.output, args.format)
-
-    if args.ai:
-        from visualization.html_generator import generate_report
-        generate_report(all_results) # all_results 通常是全局存储所有发现的列表
 
 def save_results(results, output_path, format_type):
     """保存结果到文件"""

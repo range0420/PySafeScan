@@ -55,6 +55,7 @@ class DeepSeekSecurityAnalyzer:
 
         # 1. 构建优化的Prompt（减少token消耗）
         prompt = self._build_security_prompt(api_calls)
+        #print(prompt)
 
         try:
             # 2. 调用DeepSeek API
@@ -121,52 +122,46 @@ class DeepSeekSecurityAnalyzer:
             api_details.append(detail)
         formatted_apis = "\n\n---\n\n".join(api_details)
 
-        prompt = f"""你是一个顶尖的Python安全专家。请分析以下代码片段中API调用的安全风险。
-我已经为你提供了每个API所在的函数上下文，请利用上下文判断该风险是否真实存在（排除误报）。
+        prompt = f"""你是一个顶尖的Python安全专家。请分析代码中的API安全风险并提供深度重构方案。
 
-待分析列表：
+### 审计目标：
+1. 识别危险的API调用（如 SQL注入、命令注入）。
+2. **执行变量追踪**：观察 API 参数的来源。如果参数是由前面的字符串拼接（f-string 或 +）生成的，请将该拼接过程也纳入修复范围。
+
+### 修复要求：
+- 如果漏洞涉及变量拼接，请在 "fix_code" 中提供**重构后的完整逻辑**，而不仅仅是单行调用。
+- 确保修复后的代码不再依赖原有的危险拼接变量。
+- 保持原有的缩进格式。
+
+### 待分析列表：
 {formatted_apis}
 
-    分析要求（对每个API）：
-    1. category: "source"（用户输入点）/ "sink"（危险操作点）/ "propagator"（数据传播）/ "safe"（安全）
-    2. risk_level: "high" / "medium" / "low"
-    3. vulnerability: "command_injection", "path_traversal", "sql_injection", "deserialization", "xss", "info_leak", "other"
-    4. suggestion: 中文修复建议，50字以内
-    5. 深度审计： 如果在提供的上下文代码中发现了除 API 调用语句之外的其他安全隐患（如拼写 SQL 字符串），请务必在 suggestion 中指出
-
-    重要：返回的JSON中，每个"api"字段必须使用上面提供的完整API文本，不要修改！
-
-    返回格式示例：
+### 响应格式示例（严格JSON）：
+{{
+  "apis": [
     {{
-      "apis": [
-        {{
-          "api": "os.system(user_input)",
-          "category": "sink",
-          "risk_level": "high",
-          "vulnerability": "command_injection",
-          "suggestion": "使用subprocess.run替代，并对输入参数进行严格验证"
-        }}
-      ]
+      "api": "run_query(conn, sql)",
+      "category": "sink",
+      "risk_level": "high",
+      "vulnerability": "sql_injection",
+      "suggestion": "检测到变量 sql 存在拼接风险。建议删除 sql 变量定义，直接使用参数化查询重构。",
+      "fix_code": "    conn = sqlite3.connect('app.db')\n    run_query(conn, 'SELECT * FROM users WHERE id = ?', (user_input,))",
+      "is_block_fix": true
     }}
-
-    请开始分析："""
+  ]
+}}
+"""
         return prompt
 
-    def _parse_response(self, response_text: str) -> Dict:
-        """解析API响应"""
+    def _parse_response(self, result_text: str) -> List[Dict]:
         try:
-            return json.loads(response_text)
-        except json.JSONDecodeError:
-            print("⚠️  JSON解析失败，使用默认分析")
-            # 尝试提取有效部分
-            lines = response_text.strip().split('\n')
-            for line in lines:
-                if line.strip().startswith('{') and line.strip().endswith('}'):
-                    try:
-                        return json.loads(line)
-                    except:
-                        continue
-            return {"apis": []}
+            data = json.loads(result_text)
+            # 获取 apis 列表，如果 AI 返回格式略有差异也能兼容
+            results = data.get("apis", [])
+            return results
+        except Exception as e:
+            print(f"❌ 解析 AI 响应失败: {e}")
+            return []
 
     def _normalize_api_text(self, api_text: str) -> str:
         """规范化API文本用于匹配"""
@@ -179,13 +174,18 @@ class DeepSeekSecurityAnalyzer:
         normalized = re.sub(r'\([^)]*\)', '(...)', normalized)
         return normalized
 
-    def _merge_results(self, api_calls: List[Dict], analysis: Dict) -> List[Dict]:
+    def _merge_results(self, api_calls: List[Dict], analysis_data) -> List[Dict]:
         """合并原始API信息和分析结果 - 增强匹配版本"""
         results = []
     
         # 创建智能匹配映射
+        analysis_list = {}
+        if isinstance(analysis_data, dict):
+            analysis_list = analysis_data.get('apis', [])
+        elif isinstance(analysis_data, list):
+            analysis_list = analysis_data
         analysis_map = {}
-        for item in analysis.get('apis', []):
+        for item in analysis_list:
             api_key = item.get('api', '')
             if api_key:
                 # 规范化API文本用于匹配
@@ -194,7 +194,7 @@ class DeepSeekSecurityAnalyzer:
 
         for i, api_call in enumerate(api_calls):
             api_text = api_call.get('api', '')
-            original_api = api_text
+
 
             # 尝试多种匹配策略
             analysis_item = {}
@@ -218,24 +218,27 @@ class DeepSeekSecurityAnalyzer:
 
             # 创建增强的结果对象
             enhanced = {
-                **api_call,  # 原始信息
+                **api_call,        # 1. 放入原始信息 (文件、行号等)
+                **analysis_item,   # 2. 放入 AI 返回的所有新信息 (包括 fix_code, suggestion 等)
                 'analysis_id': i + 1,
-                'category': analysis_item.get('category', 'unknown'),
-                'risk_level': analysis_item.get('risk_level', 'medium'),
-                'vulnerability': analysis_item.get('vulnerability', 'other'),
-                'suggestion': analysis_item.get('suggestion', '需要人工审查'),
                 'ai_analyzed': bool(analysis_item)
             }
+            
+            # 兼容性处理：如果 AI 没返回某些字段，给定默认值
+            if not enhanced.get('category'):
+                enhanced['category'] = 'unknown'
+            if not enhanced.get('risk_level'):
+                enhanced['risk_level'] = 'medium'
             results.append(enhanced)
     
         analyzed_count = sum(1 for r in results if r['ai_analyzed'])
         print(f"   ✅ AI分析完成: {analyzed_count}/{len(results)} 个API获得深度分析")
     
         # 调试信息
-        if analyzed_count < len(api_calls) and analysis.get('apis'):
-            print(f"   🔍 匹配详情:")
-            print(f"       待匹配: {[a.get('api', '')[:30] for a in api_calls[:3]]}")
-            print(f"       AI返回: {[a.get('api', '')[:30] for a in analysis['apis']]}")
+       # if analyzed_count < len(api_calls) and analysis.get('apis'):
+        #    print(f"   🔍 匹配详情:")
+         #   print(f"       待匹配: {[a.get('api', '')[:30] for a in api_calls[:3]]}")
+          #  print(f"       AI返回: {[a.get('api', '')[:30] for a in analysis['apis']]}")
     
         return results
 
