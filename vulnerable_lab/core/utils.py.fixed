@@ -1,0 +1,7 @@
+import shlex
+import os
+
+def backup_data(folder_name):
+    safe_folder = shlex.quote(folder_name)
+    command = f"tar -cvf backup.tar {safe_folder}"
+    os.system(command)

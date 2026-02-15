@@ -1,0 +1,15 @@
+from urllib.parse import urlparse
+import requests
+from flask import Flask, request
+
+app = Flask(__name__)
+
+@app.route("/fetch")
+def fetch_url():
+    target_url = request.args.get("url")
+    parsed_url = urlparse(target_url)
+    if parsed_url.hostname and parsed_url.hostname.endswith(".example.com"):
+        response = requests.get(target_url, timeout=5)
+        return response.text
+    else:
+        return "Invalid URL", 400

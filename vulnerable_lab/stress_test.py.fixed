@@ -1,0 +1,29 @@
+import ast
+import shlex
+import os
+import subprocess
+from functools import wraps
+
+def logger(f):
+    # 修复逻辑：
+        args = shlex.split(cmd)
+        subprocess.Popen(args, shell=False)
+    inner_sink('echo ' + data)
+class UltimateTester:
+    def __init__(self, root="/tmp"):
+        self.root = root
+
+    @logger
+    @logger # 双重装饰器测试
+    def complex_method(self, user_input, file_name):
+        # 修复逻辑：
+        try:
+            parsed_data = ast.literal_eval(data)
+        except (ValueError, SyntaxError):
+            parsed_data = data
+        return parsed_data
+def nested_vulnerability(data):
+    # 修复逻辑：
+        args = shlex.split(cmd)
+        subprocess.Popen(args, shell=False)
+    inner_sink('echo ' + data)

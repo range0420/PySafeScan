@@ -1,0 +1,14 @@
+import os
+
+class DataProcessor:
+    def __init__(self, base_path="/var/data"):
+        self.base = os.path.abspath(base_path)
+
+    def read_user_file(self, filename):
+        safe_filename = os.path.normpath(filename).lstrip(os.sep)
+        target_path = os.path.join(self.base, safe_filename)
+        if os.path.commonprefix([os.path.abspath(target_path), self.base]) == self.base:
+            with open(target_path, 'r') as f:
+                return f.read()
+        else:
+            raise ValueError("Invalid file path")
